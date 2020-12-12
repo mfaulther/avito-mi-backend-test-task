@@ -1,18 +1,43 @@
 from flask import Flask
 from flask import request
 from flask import jsonify
+from flask_sqlalchemy import SQLAlchemy
 from celery import Celery
 from datetime import datetime
 import requests
 import json
 
+DATABASE_URI = 'postgresql+psycopg2://postgres:postgres@localhost:5432/avito_test'
+
 app = Flask(__name__)
 
 app.config['CELERY_BROKER_URL'] = 'amqp://localhost:5672'
 
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+
+app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
+
+db = SQLAlchemy(app)
+
 celery = Celery('app', broker=app.config['CELERY_BROKER_URL'])
 
 URL = 'http://localhost:5005/api'
+
+
+class Count(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(64), nullable=False)
+    count = db.Column(db.Integer, nullable=False)
+    pair_id = db.Column(db.Integer, db.ForeignKey('pair.id'))
+
+
+class Pair(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    region = db.Column(db.String(64), nullable=False)
+    q = db.Column(db.String(64), nullable=False)
+    counts = db.relationship('Count', backref='p')
+
+
 
 
 def get_count(query: str, region: str) -> int:
@@ -23,42 +48,39 @@ def get_count(query: str, region: str) -> int:
 @celery.task
 def update_pairs():
 
-    with open('pairs.json') as f:
-        data = f.read()
-        pairs = json.loads(data)
-
-    for pair in pairs:
-        query = pair['query']
-        region = pair['region']
+    for pair in Pair.query.all():
+        query = pair.query
+        region = pair.region
         time = datetime.now()
         count = get_count(query, region)
-        pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
+        new_count = Count(date=time.strftime('%H:%M %d/%m/%y'), count=count, p=pair)
+        db.session.add(new_count)
+        db.session.commit()
+        #pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
         print('Pair (%s, %s) have been updated :)'.format(query, region))
 
-    with open('pairs.json', 'w') as f:
-        f.write(json.dumps(pairs))
+  #  with open('pairs.json') as f:
+  #      data = f.read()
+  #      pairs = json.loads(data)
+
+  #  for pair in pairs:
+  #      query = pair['query']
+  #      region = pair['region']
+  #      time = datetime.now()
+  #      count = get_count(query, region)
+  #      pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
+  #      print('Pair (%s, %s) have been updated :)'.format(query, region))
+
+  #  with open('pairs.json', 'w') as f:
+  #     f.write(json.dumps(pairs))
+        
 
 
 def add_new_pair(region: str, query: str) -> int:
-
-    with open('pairs.json', 'r') as f:
-        data = f.read()
-        pairs = json.loads(data)
-
-    pairs.append({
-        'id': len(pairs) + 1,
-        'query': query,
-        'region': region,
-        'counts': []
-    })
-
-    with open('pairs.json', 'w') as f:
-        f.write(json.dumps(pairs))
-    
-
-    return len(pairs) + 1
-
-
+    new_query_pair = Pair(q=query, region=region)
+    db.session.add(new_query_pair)
+    db.session.commit()
+    return new_query_pair.id
 
 @app.route('/add', methods=['POST'])
 def add():
@@ -74,10 +96,17 @@ def add():
 
 
 def get_counts_by_id(id: int):
-    with open('pairs.json') as f:
-        data = f.read()
-    pairs = json.loads(data)
-    return pairs[id - 1]['counts']
+    #with open('pairs.json') as f:
+    #    data = f.read()
+    #pairs = json.loads(data)
+    #return pairs[id - 1]['counts']
+    counts = []
+    for count in Count.query.filter_by(pair_id=id).all():
+        counts.append({
+            'time': count.date,
+            'count': count.count
+        })
+    return counts
 
 
 @app.route('/stat')
