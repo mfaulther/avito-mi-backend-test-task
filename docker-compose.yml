@@ -1,0 +1,50 @@
+version: "3.9"
+services:
+    db:
+        image: postgres
+        ports:
+            - 5433:5432
+        environment: 
+            - POSTGRES_USER=postgres
+            - POSTGRES_PASSWORD=postgres
+            - POSTGRES_DB=avito_test
+             
+    web:
+        build: .
+        expose: 
+            - 8080
+        command: bash run.sh
+        ports: 
+            - 8080:8080
+        depends_on: 
+            - db
+            - broker  
+
+    broker:
+        image: rabbitmq
+    
+    worker:
+        build: .
+        command: celery -A app.celery worker --loglevel=INFO
+        environment: 
+            - FAKE_URL=fake
+        depends_on: 
+            - broker
+            - fake
+            - web
+    beat:
+        build: .
+        command: celery -A app.celery beat --loglevel=INFO
+        depends_on: 
+            - broker
+            - web
+            - worker
+    
+    fake:
+        hostname: fake
+        expose: 
+            - 5005
+        ports: 
+            - 5005:5005
+        build: .
+        command: python fake-api.py

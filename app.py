@@ -6,12 +6,13 @@ from celery import Celery
 from datetime import datetime
 import requests
 import json
+import os
 
-DATABASE_URI = 'postgresql+psycopg2://postgres:postgres@localhost:5432/avito_test'
+DATABASE_URI = 'postgresql+psycopg2://postgres:postgres@db:5432/avito_test'
 
 app = Flask(__name__)
 
-app.config['CELERY_BROKER_URL'] = 'amqp://localhost:5672'
+app.config['CELERY_BROKER_URL'] = 'amqp://broker:5672'
 
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
@@ -21,7 +22,9 @@ db = SQLAlchemy(app)
 
 celery = Celery('app', broker=app.config['CELERY_BROKER_URL'])
 
-URL = 'http://localhost:5005/api'
+URL = 'http://0.0.0.0:5005/api'
+
+FAKE_URL = os.environ.get('FAKE_URL')
 
 
 class Count(db.Model):
@@ -41,7 +44,8 @@ class Pair(db.Model):
 
 
 def get_count(query: str, region: str) -> int:
-    resp = requests.get(URL, params={'query': query, 'region': region})
+    print(FAKE_URL)
+    resp = requests.get('http://' + FAKE_URL + ":5005/api", params={'query': query, 'region': region})
     return resp.json()['count']
 
 
@@ -49,7 +53,7 @@ def get_count(query: str, region: str) -> int:
 def update_pairs():
 
     for pair in Pair.query.all():
-        query = pair.query
+        query = pair.q
         region = pair.region
         time = datetime.now()
         count = get_count(query, region)
@@ -57,7 +61,7 @@ def update_pairs():
         db.session.add(new_count)
         db.session.commit()
         #pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
-        print('Pair (%s, %s) have been updated :)'.format(query, region))
+        print('Pair (%s, %s) have been updated :)'.format(q, region))
 
   #  with open('pairs.json') as f:
   #      data = f.read()
@@ -128,8 +132,6 @@ celery.conf.beat_schedule = {
         'schedule': 30.0,
     }
 }
-
-
 
 
 

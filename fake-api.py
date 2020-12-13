@@ -7,4 +7,4 @@ app = Flask(__name__)
 def api():
     return jsonify({'count': random.randint(1, 12)})
 
-app.run(port=5005)
+app.run(host='0.0.0.0', port=5005)
