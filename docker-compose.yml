@@ -2,9 +2,8 @@ version: "3.9"
 services:
     db:
         image: postgres
-        ports:
-            - 5433:5432
-        environment: 
+        environment:
+            - POSTGRES_HOST=5432
             - POSTGRES_USER=postgres
             - POSTGRES_PASSWORD=postgres
             - POSTGRES_DB=avito_test
@@ -30,7 +29,6 @@ services:
             - FAKE_URL=fake
         depends_on: 
             - broker
-            - fake
             - web
     beat:
         build: .
@@ -39,12 +37,4 @@ services:
             - broker
             - web
             - worker
-    
-    fake:
-        hostname: fake
-        expose: 
-            - 5005
-        ports: 
-            - 5005:5005
-        build: .
-        command: python fake-api.py
+

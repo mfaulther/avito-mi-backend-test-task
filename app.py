@@ -8,23 +8,30 @@ import requests
 import json
 import os
 
-DATABASE_URI = 'postgresql+psycopg2://postgres:postgres@db:5432/avito_test'
+DATABASE_HOST = os.environ.get('DATABASE_HOST')
+DATABASE_PORT = os.environ.get('DATABASE_PORT')
+DATABASE_USER = os.environ.get('DATABASE_USER')
+DATABASE_PASSW = os.environ.get('DATABASE_PASSW')
+DATABASE_NAME = os.environ.get('DATABASE_NAME')
+BROKER_HOST = os.environ.get('BROKER_HOST')
+BROKER_PORT = os.environ.get('BROKER_PORT')
+API_KEY = os.environ.get('API_KEY')
+
+
+LOC_API = 'https://m.avito.ru/api/1/slocations'
+QUERY_API = 'https://m.avito.ru/api/9/items'
+DATABASE_URI = 'postgresql+psycopg2://{}:{}@{}:{}/{}'.format(DATABASE_USER, DATABASE_PASSW, DATABASE_HOST, DATABASE_PORT, DATABASE_NAME)
+BROKER_URL = 'amqp://{}:{}'.format(BROKER_HOST, BROKER_PORT)
 
 app = Flask(__name__)
-
-app.config['CELERY_BROKER_URL'] = 'amqp://broker:5672'
-
+app.config['CELERY_BROKER_URL'] = BROKER_URL
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-
 app.config['SQLALCHEMY_DATABASE_URI'] = DATABASE_URI
 
 db = SQLAlchemy(app)
 
 celery = Celery('app', broker=app.config['CELERY_BROKER_URL'])
 
-URL = 'http://0.0.0.0:5005/api'
-
-FAKE_URL = os.environ.get('FAKE_URL')
 
 
 class Count(db.Model):
@@ -41,17 +48,19 @@ class Pair(db.Model):
     counts = db.relationship('Count', backref='p')
 
 
-
-
 def get_count(query: str, region: str) -> int:
-    print(FAKE_URL)
-    resp = requests.get('http://' + FAKE_URL + ":5005/api", params={'query': query, 'region': region})
-    return resp.json()['count']
+
+    loc_resp = requests.get(LOC_API, params={'key': API_KEY, 'q': region})
+    loc_id = loc_resp.json()['result']['locations'][0]['id']
+    query_resp = requests.get(QUERY_API, params={'key': API_KEY, 'locationId': loc_id, 'query': query})
+    count = query_resp.json()['result']['totalCount']
+
+    return count
 
 
 @celery.task
 def update_pairs():
-
+    print(Pair.query.all())
     for pair in Pair.query.all():
         query = pair.q
         region = pair.region
@@ -60,25 +69,7 @@ def update_pairs():
         new_count = Count(date=time.strftime('%H:%M %d/%m/%y'), count=count, p=pair)
         db.session.add(new_count)
         db.session.commit()
-        #pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
-        print('Pair (%s, %s) have been updated :)'.format(q, region))
-
-  #  with open('pairs.json') as f:
-  #      data = f.read()
-  #      pairs = json.loads(data)
-
-  #  for pair in pairs:
-  #      query = pair['query']
-  #      region = pair['region']
-  #      time = datetime.now()
-  #      count = get_count(query, region)
-  #      pair['counts'].append({'time': time.strftime('%H:%M %d/%m/%y'), 'count': count})
-  #      print('Pair (%s, %s) have been updated :)'.format(query, region))
-
-  #  with open('pairs.json', 'w') as f:
-  #     f.write(json.dumps(pairs))
         
-
 
 def add_new_pair(region: str, query: str) -> int:
     new_query_pair = Pair(q=query, region=region)
@@ -86,24 +77,19 @@ def add_new_pair(region: str, query: str) -> int:
     db.session.commit()
     return new_query_pair.id
 
+
 @app.route('/add', methods=['POST'])
 def add():
 
     new_pair = request.json
     query = new_pair['query']
     region = new_pair['region']
-
     id = add_new_pair(region, query)
 
     return jsonify({'id': id})
 
 
-
 def get_counts_by_id(id: int):
-    #with open('pairs.json') as f:
-    #    data = f.read()
-    #pairs = json.loads(data)
-    #return pairs[id - 1]['counts']
     counts = []
     for count in Count.query.filter_by(pair_id=id).all():
         counts.append({
@@ -121,15 +107,10 @@ def stat():
 
 
 celery.conf.beat_schedule = {
-   # 'add-every-30-seconds': {
-   #     'task': 'tasks.add',
-   #     'schedule': 30.0,
-   #     'args': (16, 16)
-   # },
 
     'calling-api-every-30-seconds': {
         'task': 'app.update_pairs',
-        'schedule': 30.0,
+        'schedule': 120.0,
     }
 }
 
